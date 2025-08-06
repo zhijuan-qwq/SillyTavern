@@ -22,8 +22,7 @@ RUN \
 # Create config directory and link config.yaml
 RUN \
   rm -f "config.yaml" || true && \
-  ln -s "./config/config.yaml" "config.yaml" || true && \
-  mkdir "config" || true
+  ln -s "./config/config.yaml" "config.yaml" || true
 
 # Pre-compile public libraries
 RUN \
