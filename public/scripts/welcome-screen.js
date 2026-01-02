@@ -18,7 +18,10 @@ import {
     openCharacterChat,
     printCharactersDebounced,
     renameGroupOrCharacterChat,
+    saveSettingsDebounced,
     selectCharacterById,
+    setActiveCharacter,
+    setActiveGroup,
     system_avatar,
     system_message_types,
     this_chid,
@@ -103,11 +106,11 @@ async function unshallowPermanentAssistant() {
 
 /**
  * Returns a greeting message for the assistant based on the character.
- * @param {import('./char-data.js').v1CharData} character Character data
+ * @param {Character} character Character data
  * @returns {string} Greeting message
 */
 function getAssistantGreeting(character) {
-    const defaultGreeting = t`If you're connected to an API, try asking me something!`;
+    const defaultGreeting = t`If you're connected to an API, try asking me something!` + '\n***\n' + t`**Hint:** Set any character as your welcome page assistant from their "More..." menu.`;
 
     if (!character) {
         return defaultGreeting;
@@ -126,12 +129,13 @@ function sendAssistantMessage() {
     const message = {
         name: name,
         force_avatar: avatar,
-        mes: greeting + '\n***\n' + t`**Hint:** Set any character as your welcome page assistant from their "More..." menu.`,
+        mes: greeting,
         is_system: false,
         is_user: false,
         send_date: getMessageTimeStamp(),
         extra: {
             type: system_message_types.ASSISTANT_MESSAGE,
+            swipeable: false,
         },
     };
 
@@ -296,6 +300,8 @@ async function openRecentCharacterChat(avatarId, fileName) {
 
     try {
         await selectCharacterById(characterId);
+        setActiveCharacter(avatarId);
+        saveSettingsDebounced();
         const currentChatId = getCurrentChatId();
         if (currentChatId === fileName) {
             console.debug(`Chat ${fileName} is already open.`);
@@ -322,6 +328,8 @@ async function openRecentGroupChat(groupId, fileName) {
 
     try {
         await openGroupById(groupId);
+        setActiveGroup(groupId);
+        saveSettingsDebounced();
         const currentChatId = getCurrentChatId();
         if (currentChatId === fileName) {
             console.debug(`Chat ${fileName} is already open.`);
@@ -507,23 +515,29 @@ async function getRecentChats() {
     /** @type {RecentChat[]} */
     const data = await response.json();
 
-    data.sort((a, b) => sortMoments(timestampToMoment(a.last_mes), timestampToMoment(b.last_mes)))
-        .map(chat => ({ chat, character: characters.find(x => x.avatar === chat.avatar), group: groups.find(x => x.id === chat.group) }))
-        .filter(t => t.character || t.group)
-        .forEach(({ chat, character, group }, index) => {
-            const chatTimestamp = timestampToMoment(chat.last_mes);
-            chat.char_name = character?.name || group?.name || '';
-            chat.date_short = chatTimestamp.format('l');
-            chat.date_long = chatTimestamp.format('LL LT');
-            chat.chat_name = chat.file_name.replace('.jsonl', '');
-            chat.char_thumbnail = character ? getThumbnailUrl('avatar', character.avatar) : system_avatar;
-            chat.is_group = !!group;
-            chat.hidden = index >= DEFAULT_DISPLAYED;
-            chat.avatar = chat.avatar || '';
-            chat.group = chat.group || '';
-        });
+    if (!Array.isArray(data) || data.length === 0) {
+        return [];
+    }
 
-    return data;
+    const dataWithEntities = data
+        .sort((a, b) => sortMoments(timestampToMoment(a.last_mes), timestampToMoment(b.last_mes)))
+        .map(chat => ({ chat, character: characters.find(x => x.avatar === chat.avatar), group: groups.find(x => x.id === chat.group) }))
+        .filter(t => t.character || t.group);
+
+    dataWithEntities.forEach(({ chat, character, group }, index) => {
+        const chatTimestamp = timestampToMoment(chat.last_mes);
+        chat.char_name = character?.name || group?.name || '';
+        chat.date_short = chatTimestamp.format('l');
+        chat.date_long = chatTimestamp.format('LL LT');
+        chat.chat_name = chat.file_name.replace('.jsonl', '');
+        chat.char_thumbnail = character ? getThumbnailUrl('avatar', character.avatar) : system_avatar;
+        chat.is_group = !!group;
+        chat.hidden = index >= DEFAULT_DISPLAYED;
+        chat.avatar = chat.avatar || '';
+        chat.group = chat.group || '';
+    });
+
+    return dataWithEntities.map(t => t.chat);
 }
 
 export async function openPermanentAssistantChat({ tryCreate = true, created = false } = {}) {
@@ -610,7 +624,7 @@ export function assignCharacterAsAssistant(characterId) {
     if (characterId === undefined) {
         return;
     }
-    /** @type {import('./char-data.js').v1CharData} */
+    /** @type {Character} */
     const character = characters[characterId];
     if (!character) {
         return;
